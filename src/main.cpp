@@ -2,6 +2,8 @@
 #ifndef WX_PRECOMP
 	#include <wx/wx.h>
 	#include <wx/aboutdlg.h>
+	#include <wx/filename.h>
+	#include <wx/dir.h>
 #endif
 
 
@@ -15,11 +17,23 @@ public:
 class OnePunchFrame: public wxFrame{
 public:
 	OnePunchFrame(const wxString& title, const wxPoint& pos, const wxSize& size);
+	void addCia(wxArrayString &strs) {ciaBox->InsertItems(strs, ciaBox->GetCount());}
+	void rmCia(unsigned int pos){ciaBox->Delete(pos);}
+	wxArrayInt getCiaSelection(){wxArrayInt selections; ciaBox->GetSelections(selections); return selections;}
+	void setProgress(int progressValue){ progress->SetRange(100); progress->SetValue(progressValue); }
+	void setProgressLoading(){progress->Pulse();}
 
 private:
 	void OnExit(wxCommandEvent& event);
 	void OnAbout(wxCommandEvent& event);
 	void OnOpen(wxCommandEvent& event);
+	void OnDropFiles(wxDropFilesEvent& event);
+	void OnChar(wxKeyEvent& event);
+	void OnSend(wxCommandEvent& event);
+	void OnCancel(wxCommandEvent& event);
+
+	wxListBox *ciaBox;
+	wxGauge *progress;
 
 	wxDECLARE_EVENT_TABLE();
 };
@@ -33,7 +47,7 @@ wxEND_EVENT_TABLE()
 wxIMPLEMENT_APP(OnePunch);
 
 bool OnePunch::OnInit(){
-	OnePunchFrame *frame = new OnePunchFrame("OnePunch", wxPoint(50,50), wxSize(450,340));
+	OnePunchFrame *frame = new OnePunchFrame("OnePunch", wxPoint(50,50), wxSize(450,500));
 	frame->Show(true);
 	return true;
 }
@@ -58,14 +72,17 @@ OnePunchFrame::OnePunchFrame(const wxString& title, const wxPoint& pos, const wx
 		vbox->Add(-1, 10);
 
 		wxBoxSizer *hbox3 = new wxBoxSizer(wxHORIZONTAL);
-		wxListBox *ciaBox = new wxListBox(panel, wxID_ANY, wxPoint(-1,-1), wxSize(-1, -1));
+		ciaBox = new wxListBox(panel, wxID_ANY, wxPoint(-1,-1), wxSize(-1, -1), 0, NULL, wxLB_EXTENDED);
+		ciaBox->DragAcceptFiles(true);
+		ciaBox->Connect(wxEVT_DROP_FILES, wxDropFilesEventHandler(OnePunchFrame::OnDropFiles), NULL, this);
+		ciaBox->Connect(wxEVT_CHAR, wxKeyEventHandler(OnePunchFrame::OnChar), NULL, this);
 		hbox3->Add(ciaBox, 1, wxEXPAND);
-		vbox->Add(hbox3, 1, wxLEFT | wxRIGHT | wxEXPAND, 10);
+		vbox->Add(hbox3, 10, wxLEFT | wxRIGHT | wxEXPAND, 10);
 
 		vbox->Add(-1, 10);
 
 		wxBoxSizer *hbox5 = new wxBoxSizer(wxHORIZONTAL);
-		wxGauge *progress = new wxGauge(panel, wxID_ANY, 100);
+		progress = new wxGauge(panel, wxID_ANY, 100);
 		hbox5->Add(progress, 1, wxLEFT | wxRIGHT);
 		vbox->Add(hbox5, 1, wxLEFT | wxRIGHT | wxEXPAND, 10);
 
@@ -73,7 +90,9 @@ OnePunchFrame::OnePunchFrame(const wxString& title, const wxPoint& pos, const wx
 
 		wxBoxSizer *hbox4 = new wxBoxSizer(wxHORIZONTAL);
 		wxButton *btnSend = new wxButton(panel, wxID_ANY, wxT("Send"));
+		btnSend->Connect(wxID_ANY, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OnePunchFrame::OnSend));
 		wxButton *btnCancel = new wxButton(panel, wxID_ANY, wxT("Cancel"));
+		btnCancel->Connect(wxID_ANY, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OnePunchFrame::OnCancel));
 		hbox4->Add(btnCancel, 0);
 		hbox4->Add(btnSend, 0, wxLEFT | wxBOTTOM, 5);
 		vbox->Add(hbox4, 0, wxALIGN_RIGHT | wxRIGHT, 10);
@@ -111,5 +130,58 @@ void OnePunchFrame::OnAbout(wxCommandEvent& event){
 	wxAboutBox(info);
 }
 void OnePunchFrame::OnOpen(wxCommandEvent& event){
+	wxFileDialog openFileDialog(this, _("Select CIA file"), "", "", "cia files (*.cia)|*.cia", wxFD_OPEN|wxFD_FILE_MUST_EXIST | wxFD_MULTIPLE);
+	if(openFileDialog.ShowModal() == wxID_CANCEL){
+		return;
+	}
+	wxArrayString selectedFiles;
+	openFileDialog.GetPaths(selectedFiles);
+	addCia(selectedFiles);
+}
 
+void OnePunchFrame::OnDropFiles(wxDropFilesEvent& event){
+	if(event.GetNumberOfFiles() > 0){
+		wxString* droppedfiles = event.GetFiles();
+		wxASSERT(droppedfiles);
+
+		wxString filename;
+		wxString extension;
+		wxString filespec = _T("*.cia");
+		wxArrayString files;
+
+		for(int i=0; i< event.GetNumberOfFiles(); i++){
+			filename = droppedfiles[i];
+			wxFileName::SplitPath(filename, NULL, NULL, NULL, &extension);
+			if(wxFileExists(filename) && extension == _T("cia")){
+				files.push_back(filename);
+			}
+			else if(wxDirExists(filename)){
+				wxDir::GetAllFiles(filename, &files, filespec);
+			}
+		}
+		if(!files.IsEmpty()){
+			addCia(files);
+		}
+
+	}	
+}
+void OnePunchFrame::OnChar(wxKeyEvent& event){
+	if(event.GetKeyCode() == WXK_DELETE){
+		wxArrayInt selections = getCiaSelection();
+		int removed = 0;
+		for(size_t i=0; i< selections.size(); i++){
+			rmCia(selections[i - removed]);
+			removed++;
+		}
+	}
+}
+
+void OnePunchFrame::OnSend(wxCommandEvent& event){
+	//todo send button logic
+	wxMessageBox(wxT("Send Button"));
+}
+
+void OnePunchFrame::OnCancel(wxCommandEvent& event){
+	//todo cancel button logic
+	wxMessageBox(wxT("Cancel button"));
 }
