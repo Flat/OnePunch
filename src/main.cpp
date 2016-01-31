@@ -19,6 +19,7 @@ public:
 private:
 	void OnExit(wxCommandEvent& event);
 	void OnAbout(wxCommandEvent& event);
+	void OnOpen(wxCommandEvent& event);
 
 	wxDECLARE_EVENT_TABLE();
 };
@@ -26,6 +27,7 @@ private:
 wxBEGIN_EVENT_TABLE(OnePunchFrame, wxFrame)
 	EVT_MENU(wxID_EXIT, OnePunchFrame::OnExit)
 	EVT_MENU(wxID_ABOUT, OnePunchFrame::OnAbout)
+	EVT_MENU(wxID_OPEN, OnePunchFrame::OnOpen)
 wxEND_EVENT_TABLE()
 
 wxIMPLEMENT_APP(OnePunch);
@@ -78,6 +80,7 @@ OnePunchFrame::OnePunchFrame(const wxString& title, const wxPoint& pos, const wx
 
 
 		wxMenu *menuFile = new wxMenu;
+		menuFile->Append(wxID_OPEN, wxT("&Open\tCtrl+O"));
 		menuFile->Append(wxID_EXIT);
 		wxMenu *menuHelp = new wxMenu;
 		menuHelp->Append(wxID_ABOUT);
@@ -106,4 +109,7 @@ void OnePunchFrame::OnAbout(wxCommandEvent& event){
 	info.SetCopyright("(C) Kenneth Swenson 2016");
 	info.AddDeveloper("Kenneth Swenson (Flat) <flat@imo.uto.moe>");
 	wxAboutBox(info);
+}
+void OnePunchFrame::OnOpen(wxCommandEvent& event){
+
 }
