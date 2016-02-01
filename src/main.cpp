@@ -14,7 +14,7 @@
 #include <endian.h>
 
 
-const char* version = "0.1.0";
+const char* version = "0.1.1";
 const int sendBuffSize = 32768;
 const int FBIport = 5000;
 
@@ -264,21 +264,21 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 		size_t read = 0;
 		unsigned char buffer[sendBuffSize];
 		size_t count = 0;
-		size_t written =0;
+		size_t written = 0;
 		double readMB;
-		double ciaMB = cia.Length()/1048576;
+		double ciaMB = (double)cia.Length()/1048576;
 
 		while(count != (size_t)cia.Length() && !socket->IsDisconnected()){
 			read = cia.Read(buffer, sizeof(buffer));
 			out->Write(buffer, read);
 			written = out->LastWrite();
 			count += written;
-			readMB = count/1048576;
+			readMB = (double)count/1048576;
 			setRange(cia.Length());
-			setProgress(count);
+			setProgress((int)count);
 			SetStatusText(wxString::Format("Transmitting %s: %.2f/%.2f MB", getNextCia(), readMB, ciaMB));
 		}
-		setProgress(count);
+		setProgress((int)count);
 		SetStatusText(wxString::Format("Finished sending %s", getNextCia()));
 		rmCia(0);
 		out->Close();
