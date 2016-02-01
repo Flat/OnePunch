@@ -1,7 +1,7 @@
 cmake_minimum_required (VERSION 3.4.2)
 project (OnePunch)
 aux_source_directory(./src SRC_LIST)
-set(CMAKE_BUILD_TYPE Debug)
+#set(CMAKE_BUILD_TYPE Debug)
 
 # wxWidgets
 set(wxWidgets_USE_STATIC ON)
