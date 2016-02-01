@@ -4,10 +4,25 @@
 	#include <wx/aboutdlg.h>
 	#include <wx/filename.h>
 	#include <wx/dir.h>
+	#include <wx/socket.h>
+	#include <wx/sckipc.h>
+	#include <wx/ffile.h>
+	#include <wx/utils.h>
 #endif
+#include <cstdio>
+#include <cstdint>
+#include <endian.h>
 
 
 const char* version = "0.1.0";
+const int sendBuffSize = 32768;
+const int FBIport = 5000;
+
+enum
+{
+	PulseTimer = 13,
+	SOCKET_ID = 69
+};
 
 class OnePunch: public wxApp{
 public:
@@ -20,8 +35,13 @@ public:
 	void addCia(wxArrayString &strs) {ciaBox->InsertItems(strs, ciaBox->GetCount());}
 	void rmCia(unsigned int pos){ciaBox->Delete(pos);}
 	wxArrayInt getCiaSelection(){wxArrayInt selections; ciaBox->GetSelections(selections); return selections;}
-	void setProgress(int progressValue){ progress->SetRange(100); progress->SetValue(progressValue); }
-	void setProgressLoading(){progress->Pulse();}
+	bool isciaEmpty(){return ciaBox->IsEmpty();}
+	unsigned int getCiaCount(){return ciaBox->GetCount();}
+	wxString getNextCia(){return ciaBox->GetString(0);}
+	void setRange(int value){progress->SetRange(value);}
+	void setProgress(int value){progress->SetValue(value);}
+	void setPulse(){progress->Pulse();}
+	bool connected;
 
 private:
 	void OnExit(wxCommandEvent& event);
@@ -31,9 +51,14 @@ private:
 	void OnChar(wxKeyEvent& event);
 	void OnSend(wxCommandEvent& event);
 	void OnCancel(wxCommandEvent& event);
-
+	void OnPulseTimer(wxTimerEvent& event);
+	void OnSocketEvent(wxSocketEvent& event);
 	wxListBox *ciaBox;
 	wxGauge *progress;
+	wxTextCtrl *ipTextBox;
+	wxTimer *pulseTimer;
+	wxSocketClient *socket;
+
 
 	wxDECLARE_EVENT_TABLE();
 };
@@ -42,6 +67,8 @@ wxBEGIN_EVENT_TABLE(OnePunchFrame, wxFrame)
 	EVT_MENU(wxID_EXIT, OnePunchFrame::OnExit)
 	EVT_MENU(wxID_ABOUT, OnePunchFrame::OnAbout)
 	EVT_MENU(wxID_OPEN, OnePunchFrame::OnOpen)
+	EVT_TIMER(PulseTimer, OnePunchFrame::OnPulseTimer)
+	EVT_SOCKET(SOCKET_ID, OnePunchFrame::OnSocketEvent)
 wxEND_EVENT_TABLE()
 
 wxIMPLEMENT_APP(OnePunch);
@@ -60,7 +87,7 @@ OnePunchFrame::OnePunchFrame(const wxString& title, const wxPoint& pos, const wx
 
 		wxStaticText *ipLabel = new wxStaticText(panel, wxID_ANY, wxT("3ds IP Address"));
 		hbox->Add(ipLabel, 0, wxRIGHT, 8);
-		wxTextCtrl *ipTextBox = new wxTextCtrl(panel, wxID_ANY);
+		ipTextBox = new wxTextCtrl(panel, wxID_ANY);
 		hbox->Add(ipTextBox, 1);
 		vbox->Add(hbox, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 10);
 		vbox->Add(-1, 10);
@@ -83,6 +110,7 @@ OnePunchFrame::OnePunchFrame(const wxString& title, const wxPoint& pos, const wx
 
 		wxBoxSizer *hbox5 = new wxBoxSizer(wxHORIZONTAL);
 		progress = new wxGauge(panel, wxID_ANY, 100);
+		progress->SetRange(100);
 		hbox5->Add(progress, 1, wxLEFT | wxRIGHT);
 		vbox->Add(hbox5, 1, wxLEFT | wxRIGHT | wxEXPAND, 10);
 
@@ -90,9 +118,9 @@ OnePunchFrame::OnePunchFrame(const wxString& title, const wxPoint& pos, const wx
 
 		wxBoxSizer *hbox4 = new wxBoxSizer(wxHORIZONTAL);
 		wxButton *btnSend = new wxButton(panel, wxID_ANY, wxT("Send"));
-		btnSend->Connect(wxID_ANY, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OnePunchFrame::OnSend));
+		btnSend->Connect(wxID_ANY, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OnePunchFrame::OnSend), NULL, this);
 		wxButton *btnCancel = new wxButton(panel, wxID_ANY, wxT("Cancel"));
-		btnCancel->Connect(wxID_ANY, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OnePunchFrame::OnCancel));
+		btnCancel->Connect(wxID_ANY, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OnePunchFrame::OnCancel),NULL, this);
 		hbox4->Add(btnCancel, 0);
 		hbox4->Add(btnSend, 0, wxLEFT | wxBOTTOM, 5);
 		vbox->Add(hbox4, 0, wxALIGN_RIGHT | wxRIGHT, 10);
@@ -112,6 +140,7 @@ OnePunchFrame::OnePunchFrame(const wxString& title, const wxPoint& pos, const wx
 		panel->SetSizer(vbox);
 		Center();
 		CreateStatusBar();
+		pulseTimer = new wxTimer(this, PulseTimer);
 		SetStatusText("Ready!");
 
 	}
@@ -124,9 +153,9 @@ void OnePunchFrame::OnAbout(wxCommandEvent& event){
 	wxAboutDialogInfo info;
 	info.SetName(_("OnePunch"));
 	info.SetVersion(_(version));
-	info.SetDescription(_("An application to transmit cia files to a 3ds with FBI.\nhttp://github.com/Flat/OnePunch"));
-	info.SetCopyright("(C) Kenneth Swenson 2016");
-	info.AddDeveloper("Kenneth Swenson (Flat) <flat@imo.uto.moe>");
+	info.SetDescription(_("An application to transmit cia files to a 3ds with FBI.\nhttp://github.com/Flat/OnePunch\nThis program is licensed under the MIT License. Full license text available here: https://github.com/Flat/OnePunch/blob/master/LICENSE"));
+	info.SetCopyright("(C) Ken Swenson 2016");
+	info.AddDeveloper("Ken Swenson (Flat) <flat@imo.uto.moe>");
 	wxAboutBox(info);
 }
 void OnePunchFrame::OnOpen(wxCommandEvent& event){
@@ -142,7 +171,6 @@ void OnePunchFrame::OnOpen(wxCommandEvent& event){
 void OnePunchFrame::OnDropFiles(wxDropFilesEvent& event){
 	if(event.GetNumberOfFiles() > 0){
 		wxString* droppedfiles = event.GetFiles();
-		wxASSERT(droppedfiles);
 
 		wxString filename;
 		wxString extension;
@@ -177,11 +205,112 @@ void OnePunchFrame::OnChar(wxKeyEvent& event){
 }
 
 void OnePunchFrame::OnSend(wxCommandEvent& event){
-	//todo send button logic
-	wxMessageBox(wxT("Send Button"));
+
+	wxTCPClient *TCPClient = new wxTCPClient();
+	wxString host = ipTextBox->GetValue();
+	if(host.IsEmpty()){
+		wxMessageBox("IP address cannot be left blank.", "No IP", wxOK | wxICON_ERROR, this);
+		return;
+	}
+	wxString port = wxString::Format("%i", FBIport);
+	socket = new wxSocketClient();
+	wxIPV4address address;
+	address.Hostname(host);
+	address.Service(wxString::Format("%i", FBIport));
+	wxCharBuffer *buffer = new wxCharBuffer(sizeof(char) * sendBuffSize);
+	socket->SetEventHandler(*this, SOCKET_ID);
+	socket->Notify(true);
+
+	if(!TCPClient->ValidHost(host)){
+		wxMessageBox("Invalid IP address. Please enter a valid IP.", "Not a Valid Host", wxOK | wxICON_ERROR, this);
+		return;
+	}
+	if(isciaEmpty()){
+		wxMessageBox(wxT("You must add cia files to send."), wxT("Empty Queue"));
+		return;
+	}
+	SetStatusText(getNextCia());
+	unsigned int cias = getCiaCount();
+	for(int i = 0; i < cias; i++){
+		wxSleep(2);
+		wxFFile cia;
+		cia.Open(getNextCia());
+		wxFileOffset ciaSize = cia.Length();
+		uint64_t cSize = (uint64_t)ciaSize;
+		cSize = htobe64(cSize);
+		socket->SetFlags(wxSOCKET_WAITALL_WRITE);
+		socket->Connect(address, false);
+		pulseTimer->Start(100);
+		SetStatusText("Connecting to 3ds at " + ipTextBox->GetValue() + ":" + wxString::Format("%i", FBIport));
+		while(!socket->WaitOnConnect(10, 0)){
+
+		}
+		bool success = socket->IsConnected();
+		connected = success;
+		if(!success){
+			SetStatusText("Failed to connect.");
+			pulseTimer->Stop();
+			setProgress(0);
+			return;
+		}
+		SetStatusText("Connected!");
+		SetStatusText("Sending CIA Length");
+
+		char *byteSize = (char*)&cSize;
+		socket->Write(byteSize, sizeof(byteSize));
+		SetStatusText("Sending CIA");
+		pulseTimer->Stop();
+		wxSocketOutputStream *out = new wxSocketOutputStream(*socket);
+		size_t read = 0;
+		unsigned char buffer[sendBuffSize];
+		size_t count = 0;
+		size_t written =0;
+		double readMB;
+		double ciaMB = cia.Length()/1048576;
+
+		while(count != (size_t)cia.Length() && !socket->IsDisconnected()){
+			read = cia.Read(buffer, sizeof(buffer));
+			out->Write(buffer, read);
+			written = out->LastWrite();
+			count += written;
+			readMB = count/1048576;
+			setRange(cia.Length());
+			setProgress(count);
+			SetStatusText(wxString::Format("Transmitting %s: %.2f/%.2f MB", getNextCia(), readMB, ciaMB));
+		}
+		setProgress(count);
+		SetStatusText(wxString::Format("Finished sending %s", getNextCia()));
+		rmCia(0);
+		out->Close();
+		socket->Close();
+		cia.Close();
+	}
+	
+	
+	
+	
 }
 
 void OnePunchFrame::OnCancel(wxCommandEvent& event){
-	//todo cancel button logic
-	wxMessageBox(wxT("Cancel button"));
+	pulseTimer->Stop();
+	if(socket->IsConnected()){
+		socket->Close();
+	}
+	connected = false;
+	setProgress(0);
+	SetStatusText("Canceled operation.");
+}
+
+void OnePunchFrame::OnPulseTimer(wxTimerEvent& event){
+	setPulse();
+}
+
+void OnePunchFrame::OnSocketEvent(wxSocketEvent& event){
+	//todo implement socket events
+	if(event.GetSocketEvent() == wxSOCKET_CONNECTION){
+		connected = true;
+	}
+	if(event.GetSocketEvent() == wxSOCKET_LOST){
+		connected = false;
+	}
 }
