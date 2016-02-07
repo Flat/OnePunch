@@ -11,7 +11,9 @@
 #endif
 #include <cstdio>
 #include <cstdint>
+#ifdef __unix__
 #include <endian.h>
+#endif
 
 
 const char* version = "0.1.1";
@@ -237,7 +239,13 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 		cia.Open(getNextCia());
 		wxFileOffset ciaSize = cia.Length();
 		uint64_t cSize = (uint64_t)ciaSize;
+		#ifdef __unix__
 		cSize = htobe64(cSize);
+		#elif defined(_WIN32) || defined(WIN32)
+		const uint32_t upper = htonl(static_cast<uint32_t>(cSize >> 32));
+		const uint32_t lower = htonl(static_cast<uint32_t>(cSize & 0xFFFFFFFFLL));
+		cSize = (static_cast<uint64_t>(lower) << 32) | upper;
+		#endif
 		socket->SetFlags(wxSOCKET_WAITALL_WRITE);
 		socket->Connect(address, false);
 		pulseTimer->Start(100);
