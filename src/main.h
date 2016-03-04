@@ -5,10 +5,13 @@
 	#include <wx/filename.h>
 	#include <wx/dir.h>
 	#include <wx/socket.h>
+	#include <wx/sckstrm.h>
 	#include <wx/sckipc.h>
 	#include <wx/ffile.h>
+	#include <wx/wfstream.h>
 	#include <wx/utils.h>
 	#include <wx/log.h>
+	#include <wx/datstrm.h>
 #endif
 #include <cstdio>
 #include <cstdint>

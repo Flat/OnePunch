@@ -209,10 +209,13 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 	wxIPV4address address;
 	address.Hostname(host);
 	address.Service(wxString::Format("%i", FBIport));
-	wxCharBuffer *buffer = new wxCharBuffer(sizeof(char) * sendBuffSize);
 	socket->SetEventHandler(*this, SOCKET_ID);
 	socket->SetNotify(wxSOCKET_CONNECTION_FLAG | wxSOCKET_LOST_FLAG);
+	socket->SetFlags(wxSOCKET_WAITALL);
 	socket->Notify(true);
+	socket->SetTimeout(4);
+	wxSocketOutputStream* sos = new wxSocketOutputStream(*socket);
+
 
 	if(!TCPClient->ValidHost(host)){
 		wxMessageBox("Invalid IP address. Please enter a valid IP.", "Not a Valid Host", wxOK | wxICON_ERROR, this);
@@ -225,14 +228,12 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 	SetStatusText(getNextCia());
 	unsigned int cias = getCiaCount();
 	for(int i = 0; i < cias; i++){
-		wxFFile cia;
-		cia.Open(getNextCia());
-		if(!cia.IsOpened()){
-			cia.Close();
+		wxFileInputStream* cia = new wxFileInputStream(getNextCia());
+		if(!cia->IsOk()){
 			SetStatusText("Failed to open cia");
 			return;
 		}
-		wxFileOffset ciaSize = cia.Length();
+		wxFileOffset ciaSize = cia->GetLength();
 		uint64_t cSize = (uint64_t)ciaSize;
 		#ifdef __unix__
 		cSize = htobe64(cSize);
@@ -241,7 +242,6 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 		const uint32_t lower = htonl(static_cast<uint32_t>(cSize & 0xFFFFFFFFLL));
 		cSize = (static_cast<uint64_t>(lower) << 32) | upper;
 		#endif
-		socket->SetFlags(wxSOCKET_WAITALL);
 		socket->Connect(address, false);
 		pulseTimer->Start(100);
 		SetStatusText("Connecting to 3DS at " + ipTextBox->GetValue() + ":" + wxString::Format("%i", FBIport));
@@ -260,44 +260,39 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 		SetStatusText("Sending CIA Length");
 
 		char *byteSize = (char*)&cSize;
-		socket->Write(byteSize, sizeof(byteSize));
+		sos->Write(byteSize, sizeof(byteSize));
 		SetStatusText("Sending CIA");
 		pulseTimer->Stop();
 		size_t read = 0;
-		unsigned char buffer[sendBuffSize];
+		char* buffer[sendBuffSize];
 		size_t count = 0;
 		size_t written = 0;
 		double readMB;
-		double ciaMB = (double)cia.Length()/1048576;
+		double ciaMB = (double)cia->GetLength()/1048576;
 
-		while(count != (size_t)cia.Length() && !socket->IsDisconnected()){
-			if(!socket->WaitForWrite(20, 0)){
-				SetStatusText("Timed out while waiting for socket to become available.");
-				socket->Close();
-				cia.Close();
-				return;
-			}
-			read = cia.Read(buffer, sizeof(buffer));
-			socket->Write(buffer, read);
+		while(count != (size_t)cia->GetLength() && !socket->IsDisconnected()){
+			cia->Read(buffer, sizeof(buffer));
+			read = cia->LastRead();
+			sos->Write(buffer, read);
 			if(socket->Error()){
 				SetStatusText("Failed while transmitting");
 				wxMessageBox(wxString::Format("Socket Error: %i", socket->LastError()), wxT("Error while transferring"));
+				sos->Close();
 				socket->Close();
-				cia.Close();
 				return;
 			}
-			written = socket->LastWriteCount();
+			written = sos->LastWrite();
 			count += written;
 			readMB = (double)count/1048576;
-			setRange(cia.Length());
+			setRange(cia->GetLength());
 			setProgress((int)count);
 			SetStatusText(wxString::Format("Transmitting %s: %.2f/%.2f MB", getNextCia(), readMB, ciaMB));
 		}
 		setProgress((int)count);
 		SetStatusText(wxString::Format("Finished sending %s", getNextCia()));
 		rmCia(0);
+		sos->Close();
 		socket->Close();
-		cia.Close();
 	}
 	
 	
