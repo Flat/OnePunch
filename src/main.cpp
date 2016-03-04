@@ -1,25 +1,7 @@
-#include <wx/wxprec.h>
-#ifndef WX_PRECOMP
-	#include <wx/wx.h>
-	#include <wx/aboutdlg.h>
-	#include <wx/filename.h>
-	#include <wx/dir.h>
-	#include <wx/socket.h>
-	#include <wx/sckipc.h>
-	#include <wx/ffile.h>
-	#include <wx/utils.h>
-#endif
-#include <cstdio>
-#include <cstdint>
-#ifdef __unix__
-#include <endian.h>
-#endif
+#include "main.h"
 
 
-const char* version = "0.1.1";
-const int sendBuffSize = 32768;
-const int FBIport = 5000;
-
+// Setup socket ID and Timer ID
 enum
 {
 	PulseTimer = 13,
@@ -43,6 +25,7 @@ public:
 	void setRange(int value){progress->SetRange(value);}
 	void setProgress(int value){progress->SetValue(value);}
 	void setPulse(){progress->Pulse();}
+	void stopPulse(){}
 	bool connected;
 
 private:
@@ -55,11 +38,11 @@ private:
 	void OnCancel(wxCommandEvent& event);
 	void OnPulseTimer(wxTimerEvent& event);
 	void OnSocketEvent(wxSocketEvent& event);
-	wxListBox *ciaBox;
-	wxGauge *progress;
-	wxTextCtrl *ipTextBox;
-	wxTimer *pulseTimer;
-	wxSocketClient *socket;
+	wxListBox *ciaBox = NULL;
+	wxGauge *progress = NULL;
+	wxTextCtrl *ipTextBox = NULL;
+	wxTimer *pulseTimer = NULL;
+	wxSocketClient *socket = NULL;
 
 
 	wxDECLARE_EVENT_TABLE();
@@ -75,19 +58,22 @@ wxEND_EVENT_TABLE()
 
 wxIMPLEMENT_APP(OnePunch);
 
+// Load and show UI
 bool OnePunch::OnInit(){
 	OnePunchFrame *frame = new OnePunchFrame("OnePunch", wxPoint(50,50), wxSize(450,500));
 	frame->Show(true);
 	return true;
 }
 
+
+// Setup UI in wxWidgets
 OnePunchFrame::OnePunchFrame(const wxString& title, const wxPoint& pos, const wxSize& size)
 	: wxFrame(NULL, wxID_ANY, title, pos, size){
 		wxPanel *panel = new wxPanel(this, -1);
 		wxBoxSizer *vbox = new wxBoxSizer(wxVERTICAL);
 		wxBoxSizer *hbox = new wxBoxSizer(wxHORIZONTAL);
 
-		wxStaticText *ipLabel = new wxStaticText(panel, wxID_ANY, wxT("3ds IP Address"));
+		wxStaticText *ipLabel = new wxStaticText(panel, wxID_ANY, wxT("3DS IP Address"));
 		hbox->Add(ipLabel, 0, wxRIGHT, 8);
 		ipTextBox = new wxTextCtrl(panel, wxID_ANY);
 		hbox->Add(ipTextBox, 1);
@@ -155,7 +141,7 @@ void OnePunchFrame::OnAbout(wxCommandEvent& event){
 	wxAboutDialogInfo info;
 	info.SetName(_("OnePunch"));
 	info.SetVersion(_(version));
-	info.SetDescription(_("An application to transmit cia files to a 3ds with FBI.\nhttp://github.com/Flat/OnePunch\nThis program is licensed under the MIT License. Full license text available here: https://github.com/Flat/OnePunch/blob/master/LICENSE"));
+	info.SetDescription(_("An application to transmit cia files to a 3DS with FBI.\nhttp://github.com/Flat/OnePunch\nThis program is licensed under the MIT License. Full license text available here: https://github.com/Flat/OnePunch/blob/master/LICENSE"));
 	info.SetCopyright("(C) Ken Swenson 2016");
 	info.AddDeveloper("Ken Swenson (Flat) <flat@imo.uto.moe>");
 	wxAboutBox(info);
@@ -170,6 +156,7 @@ void OnePunchFrame::OnOpen(wxCommandEvent& event){
 	addCia(selectedFiles);
 }
 
+// Handle files dragged to UI
 void OnePunchFrame::OnDropFiles(wxDropFilesEvent& event){
 	if(event.GetNumberOfFiles() > 0){
 		wxString* droppedfiles = event.GetFiles();
@@ -195,6 +182,8 @@ void OnePunchFrame::OnDropFiles(wxDropFilesEvent& event){
 
 	}	
 }
+
+// Handle DEL key to delete currently selected entry
 void OnePunchFrame::OnChar(wxKeyEvent& event){
 	if(event.GetKeyCode() == WXK_DELETE){
 		wxArrayInt selections = getCiaSelection();
@@ -206,6 +195,7 @@ void OnePunchFrame::OnChar(wxKeyEvent& event){
 	}
 }
 
+// Send CIA to 3DS
 void OnePunchFrame::OnSend(wxCommandEvent& event){
 
 	wxTCPClient *TCPClient = new wxTCPClient();
@@ -221,6 +211,7 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 	address.Service(wxString::Format("%i", FBIport));
 	wxCharBuffer *buffer = new wxCharBuffer(sizeof(char) * sendBuffSize);
 	socket->SetEventHandler(*this, SOCKET_ID);
+	socket->SetNotify(wxSOCKET_CONNECTION_FLAG | wxSOCKET_LOST_FLAG);
 	socket->Notify(true);
 
 	if(!TCPClient->ValidHost(host)){
@@ -234,9 +225,13 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 	SetStatusText(getNextCia());
 	unsigned int cias = getCiaCount();
 	for(int i = 0; i < cias; i++){
-		wxSleep(2);
 		wxFFile cia;
 		cia.Open(getNextCia());
+		if(!cia.IsOpened()){
+			cia.Close();
+			SetStatusText("Failed to open cia");
+			return;
+		}
 		wxFileOffset ciaSize = cia.Length();
 		uint64_t cSize = (uint64_t)ciaSize;
 		#ifdef __unix__
@@ -246,11 +241,11 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 		const uint32_t lower = htonl(static_cast<uint32_t>(cSize & 0xFFFFFFFFLL));
 		cSize = (static_cast<uint64_t>(lower) << 32) | upper;
 		#endif
-		socket->SetFlags(wxSOCKET_WAITALL_WRITE);
+		socket->SetFlags(wxSOCKET_WAITALL);
 		socket->Connect(address, false);
 		pulseTimer->Start(100);
-		SetStatusText("Connecting to 3ds at " + ipTextBox->GetValue() + ":" + wxString::Format("%i", FBIport));
-		while(!socket->WaitOnConnect(10, 0)){
+		SetStatusText("Connecting to 3DS at " + ipTextBox->GetValue() + ":" + wxString::Format("%i", FBIport));
+		while(!socket->WaitOnConnect(25, 0)){
 
 		}
 		bool success = socket->IsConnected();
@@ -268,7 +263,6 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 		socket->Write(byteSize, sizeof(byteSize));
 		SetStatusText("Sending CIA");
 		pulseTimer->Stop();
-		wxSocketOutputStream *out = new wxSocketOutputStream(*socket);
 		size_t read = 0;
 		unsigned char buffer[sendBuffSize];
 		size_t count = 0;
@@ -277,9 +271,22 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 		double ciaMB = (double)cia.Length()/1048576;
 
 		while(count != (size_t)cia.Length() && !socket->IsDisconnected()){
+			if(!socket->WaitForWrite(20, 0)){
+				SetStatusText("Timed out while waiting for socket to become available.");
+				socket->Close();
+				cia.Close();
+				return;
+			}
 			read = cia.Read(buffer, sizeof(buffer));
-			out->Write(buffer, read);
-			written = out->LastWrite();
+			socket->Write(buffer, read);
+			if(socket->Error()){
+				SetStatusText("Failed while transmitting");
+				wxMessageBox(wxString::Format("Socket Error: %i", socket->LastError()), wxT("Error while transferring"));
+				socket->Close();
+				cia.Close();
+				return;
+			}
+			written = socket->LastWriteCount();
 			count += written;
 			readMB = (double)count/1048576;
 			setRange(cia.Length());
@@ -289,7 +296,6 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 		setProgress((int)count);
 		SetStatusText(wxString::Format("Finished sending %s", getNextCia()));
 		rmCia(0);
-		out->Close();
 		socket->Close();
 		cia.Close();
 	}
@@ -300,9 +306,13 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 }
 
 void OnePunchFrame::OnCancel(wxCommandEvent& event){
-	pulseTimer->Stop();
-	if(socket->IsConnected()){
-		socket->Close();
+	if(pulseTimer->IsRunning()){
+		pulseTimer->Stop();		
+	}
+	if(socket != NULL){
+		if(socket->IsConnected()){
+			socket->Close();
+		}
 	}
 	connected = false;
 	setProgress(0);
