@@ -245,8 +245,8 @@ void OnePunchFrame::OnSend(wxCommandEvent& event){
 		socket->Connect(address, false);
 		pulseTimer->Start(100);
 		SetStatusText("Connecting to 3DS at " + ipTextBox->GetValue() + ":" + wxString::Format("%i", FBIport));
-		while(!socket->WaitOnConnect(25, 0)){
-
+		while(!socket->WaitOnConnect(25, 0) && socket->IsConnected()){
+			wxSleep(1);
 		}
 		bool success = socket->IsConnected();
 		connected = success;

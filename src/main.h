@@ -20,6 +20,6 @@
 #endif
 
 
-const char* version = "0.2.0";
+const char* version = "0.2.1";
 const int sendBuffSize = 32768;
 const int FBIport = 5000;
